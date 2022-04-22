@@ -1,0 +1,335 @@
+###########################################################
+## Title: RPHC_Report_II.R
+## Project: RPHC
+## By: Charysse Gibson
+## Date: December 13, 2021
+###########################################################
+## Purpose: Mastersheet, Statistics & Mapping
+###########################################################
+setwd("G:/My Drive/Institute for Healing Justice and Equity/RPHC/")
+
+library(data.table)
+library(Hmisc)
+library(tableone)
+
+## Datasets & Variables
+    # RPHC Locations: TIMESTAMP,JURISDICTION_TYPE,LOCATION,STATE,JOINT,ADJOIN_LOCATION,GOV_BODY,POLICY_TYPE,POLICY_STATUS,POLICY_DATE,DOC_SAVED,SDOH,POLICY_ACT
+    # RPHC Locations Codebook: SURVEY_LABEL,VARIABLE_NAME,TYPE,DETAILS,POSSIBLE_VALUES,NOTES
+# Geodata: GEOID,STATE_NAME,NAME,TYPE,INTPTLAT,INTPTLONG,CENSUS_NAME,CENSUS_GEO
+# Missing Geocodes: (first see RPHC->Coding->00_geodata.R) JURISDICTION_TYPE, LOCATION, STATE,GEOID,INTPTLAT,INTPTLONG
+# State Regions: STATE_NAME, STATE_CODE, STATE_GEOID, STATE_REGION, REGION_DIVISION
+
+
+#-----Input & Manage Data-----
+
+# 1 - Read in datasets
+
+rphc <- fread('Data/Report II/RPHC Locations_20220418.csv')
+str(rphc)
+rphc_codebook <- fread('Data/Report II/RPHC Locations Codebook_20220111.csv')
+str(rphc_codebook)
+geodata <- fread(file = "Data/Geodata/geodata_20201110.csv", colClasses = c(GEOID='character'))
+str(geodata)
+# missing geocodes already integrated in geodata file, if many new missing locations integrate new data below and use original geodata file:
+missing_geocodes <- as.data.table(read.delim('Data/Report II/missing_geocodes.txt', header=TRUE, colClasses = c(GEOID = "character")))
+# str(missing_geocodes)
+state_regions <- fread(file = "Data/Geodata/geodata_state_regions_20210329.csv", colClasses = c(STATE_GEOID='character'))
+str(state_regions)
+
+# 2 - Convert variable names in RPHC locations dataset
+names(rphc) <- rphc_codebook$VARIABLE_NAME
+names(rphc)
+
+# 3 - Change and manage variable types
+
+# convert TIMESTAMP variable from character to datetime
+rphc[,TIMESTAMP:=as.Date(TIMESTAMP,format="%m/%d/%Y %H:%M:%S")]
+str(rphc)
+# convert POLICY_DATE variable from character to date
+rphc[,POLICY_DATE:=as.Date(POLICY_DATE,'%m/%d/%Y')]
+str(rphc)
+
+# # 4 - Merge geodata and verify locations
+# names(geodata)
+# names(rphc)
+# setkey(geodata,NAME,STATE_NAME)
+# setkey(rphc,LOCATION,STATE)
+# rphc <-  rphc[geodata,':=' 
+#               (GEOID=GEOID,
+#                 INTPTLAT=INTPTLAT,
+#                 INTPTLONG=INTPTLONG)]
+
+# convert N/As to NAs
+rphc[LOCATION=='N/A',LOCATION:=NA]
+
+# # check for missing geodata & errors
+# rphc_missing <- rphc[is.na(GEOID),.(TIMESTAMP,LOCATION,STATE,JURISDICTION_TYPE)]
+# rphc_missing <- tibble::as_tibble(rphc_missing)
+# rphc_missing # 3 locations with missing geodata - Ellington, CT; Lyme, CT; Morongo Basin, CA
+
+# 5 - Merge state region data
+setkey(rphc,STATE)
+setkey(state_regions,STATE_NAME)
+rphc[state_regions, ':=' (STATE_CODE=STATE_CODE,
+                             STATE_REGION=STATE_REGION)]
+
+# 6 - Order by date and retain latest policy
+rphc <- rphc[order(STATE,LOCATION,-POLICY_DATE)]
+nrow(rphc) 
+rphc_latestpolicy <- unique(rphc, by=c('STATE','LOCATION'))
+nrow(rphc_latestpolicy) 
+# check locations with multiple policies / updates / amended
+rphc[duplicated(rphc, by=c('STATE',"LOCATION")),] 
+
+# 7 - Organize variables order
+# cat(paste(shQuote(names(rphc), type="cmd"), collapse=","))
+# rphc <- setcolorder(rphc, c("TIMESTAMP","JURISDICTION_TYPE","LOCATION","STATE","JOINT","ADJOIN_LOCATION","GOV_BODY","POLICY_TYPE","POLICY_STATUS","POLICY_DATE","DOC_SAVED","SDOH","POLICY_ACT","GEOID","INTPTLAT","INTPTLONG","STATE_CODE","STATE_REGION","REGION_DIVISION"))
+
+#-----descriptive statistics-----
+
+# 1 - Run descriptive statistics
+
+# Get list of all variables
+# cat(paste(shQuote(names(rphc), type="cmd"), collapse=","))
+
+## Vector of variables
+myVars <- c("JURISDICTION_TYPE",
+            "STATE",
+            "STATE_REGION",
+            "JOINT",
+            "GOV_BODY",
+            "POLICY_TYPE",
+            "POLICY_STATUS",
+            "DOC_SAVED",
+            "SDOH",
+            "POLICY_ACT")
+
+## Vector of categorical variables that need transformation
+catVars <- c("JURISDICTION_TYPE",
+             "STATE",
+             "STATE_REGION",
+             "JOINT",
+             "GOV_BODY",
+             "POLICY_TYPE",
+             "POLICY_STATUS",
+             "DOC_SAVED",
+             "SDOH",
+             "POLICY_ACT")
+
+## Create TableOne object for STATES ONLY
+tab1_state <- CreateTableOne(vars = myVars, data = rphc_latestpolicy[JURISDICTION_TYPE=="State",], factorVars = catVars)
+summary(tab1_state)
+## Export object
+print(tab1_state, quote = TRUE, noSpaces = TRUE)
+
+## Create TableOne object for COUNTY & LOCALITY
+tab1_locality <- CreateTableOne(vars = myVars, data = rphc_latestpolicy[JURISDICTION_TYPE!="State",], factorVars = catVars)
+summary(tab1_locality)
+## Export object
+print(tab1_locality, quote = TRUE, noSpaces = TRUE)
+
+# 1 - Stratified descriptive statistics
+
+# descriptive stats tables for strata (cities and counties by region)
+stratafied_tab1 <- CreateTableOne(vars = catVars, strata = "STATE_REGION", data = rphc_latestpolicy[JURISDICTION_TYPE!="State"&JURISDICTION_TYPE!="District of Columbia",], factorVars = catVars)
+stratafied_tab1
+summary(stratafied_tab1)
+
+# descriptive stats tables for strata (cities vs counties)
+stratafied_tab2 <- CreateTableOne(vars = catVars, strata = "JURISDICTION_TYPE", data = rphc_latestpolicy[JURISDICTION_TYPE!="State"&JURISDICTION_TYPE!="District of Columbia",], factorVars = catVars)
+stratafied_tab2
+summary(stratafied_tab1)
+
+#-----Jurisdiction Lists-----
+
+# Get list of variables
+## Vector of variables
+myVars <- c("STATE")
+## Vector of categorical variables that need transformation
+catVars <- c("STATE")
+
+# number of localities in states stratified by regions
+states_tab1 <- CreateTableOne(vars = catVars, strata = "STATE_REGION", data = rphc_latestpolicy[JURISDICTION_TYPE=="County"&JURISDICTION_TYPE!="District of Columbia",], factorVars = catVars)
+states_tab1
+
+# Paste list of locality names (change STATE)
+paste(rphc_latestpolicy[JURISDICTION_TYPE=='County'&STATE=='Illinois',LOCATION], collapse=", ")
+
+#-----state count-----
+
+# create state count
+state_count <- data.table(table(rphc_latestpolicy[JURISDICTION_TYPE!='State',.(STATE)]))
+names(state_count) <- c('STATE', 'N')
+## merge state count to region and state fips codes
+rphc_state <- state_regions[!is.na(STATE_REGION),]
+## rename state_date variables
+names(rphc_state) <- c('STATE','STATE_CODE','GEOID','REGION','DIVISION')
+setkey(rphc_state,STATE)
+setkey(state_count,STATE)
+rphc_state[state_count,N:=N]
+rphc_state[is.na(N),N:=0]
+
+## convert regions to factor
+rphc_state$REGION <- factor(rphc_state$REGION, levels = c("Midwest", "Northeast", "South", "West"))
+str(rphc_state)
+
+# #-----state response levels-----
+# 
+# # create state response levels factor variable
+# ## 1 - create list of states responding on a city level
+# # unique(rphc_latestpolicy[JURISDICTION_TYPE=='Locality',list(STATE,JURISDICTION_TYPE)], by=c('STATE','JURISDICTION_TYPE'))
+# ## 2 - create list of states responding on a county level
+# # unique(rphc_latestpolicy[JURISDICTION_TYPE=='County',list(STATE,JURISDICTION_TYPE)], by=c('STATE','JURISDICTION_TYPE'))
+# ## 3 - merge city and county indicator lists
+# rphc_types <- merge(x=unique(rphc_latestpolicy[JURISDICTION_TYPE=='Locality',list(STATE,JURISDICTION_TYPE)], by=c('STATE','JURISDICTION_TYPE')),
+#                     y=unique(rphc_latestpolicy[JURISDICTION_TYPE=='County',list(STATE,JURISDICTION_TYPE)], by=c('STATE','JURISDICTION_TYPE')),
+#                     by="STATE",all=TRUE)
+# ## 4 - rename locality and state indicator variables
+# names(rphc_types) <- c('STATE','RESPOND_LOCALITY','RESPOND_CITY')
+# ## 5 - create list of states responding on a state level
+# unique(rphc[JURISDICTION_TYPE=='State'],by='STATE_CODE')
+# 
+# ## 5 - create types factors
+# rphc_types[!is.na(LOCALITY_TYPE), LOCALITY_TYPE:='1']
+# rphc_types[!is.na(COUNTY_TYPE), COUNTY_TYPE:='1']
+# rphc_types$JURISDICTION_TYPES <- factor(rphc_types$JURISDICTION_TYPES, levels = c('Responding at county level',
+#                                                                                      'Responding at local level',
+#                                                                                      'Responding at both county and local levels',
+#                                                                                      'Not ready to respond'))
+# rphc_types[COUNTY_TYPE==1&is.na(LOCALITY_TYPE),JURISDICTION_TYPES:='Responding at county level']
+# rphc_types[is.na(COUNTY_TYPE)&LOCALITY_TYPE==1,JURISDICTION_TYPES:='Responding at local level']
+# rphc_types[COUNTY_TYPE==1&LOCALITY_TYPE==1,JURISDICTION_TYPES:='Responding at both county and local levels']
+# ## 6 - merge type to state data
+# setkey(rphc_state,STATE)
+# setkey(rphc_types,STATE)
+# rphc_state[rphc_types, JURISDICTION_TYPES:=JURISDICTION_TYPES]
+# rphc_state[is.na(JURISDICTION_TYPES),JURISDICTION_TYPES:='Not ready to respond']
+
+#-----Maps-----
+
+# Regional state map of RPHC locations
+
+# merge rphc_state to state_laea spatial data
+library(tidycensus)
+data("state_laea", package = 'tidycensus')
+## merge variables to spatial data
+library(sp)
+state_laea <- merge(state_laea, rphc_state, by='GEOID', all.x=TRUE)
+## convert to spatial data
+library(sf)
+states_spat <- as_Spatial(state_laea)
+
+# MAPPING
+
+library(tmap)
+library(tmaptools)
+# tmaptools::palette_explorer()
+
+tmap_mode('plot')
+# tmap_mode('view')
+
+# State Jurisdiction Types Responding
+# windows(45,40)
+# tm_shape(states_spat) +
+#   tm_layout(main.title='States Responding to Racism as a Public Health Crisis, 2021', scale=1, main.title.size = 1.2, main.title.position = 'center',
+#             bg.color='white', frame=FALSE, inner.margins = c(.0,.37,.1,.06),
+#             legend.frame=FALSE, legend.frame.lwd = 0, legend.position = c(.027, .20), legend.text.size = .8, legend.title.size = 1) + 
+#   tm_polygons(col = 'JURISDICTION_TYPES', title='', showNA=FALSE, border.col = 'white', lwd=1, border.alpha = 1,
+#               palette=c('#a36e1a','#a31a1a','#216070','#b5b5b5')) +
+#   tm_credits(text='   Institute for Healing Justice & Equity - \n   Data as of December 31, 2021',
+#              position = c('left','bottom'), size = .7)
+
+
+# State counts, by region
+windows(60,45)
+tm_shape(states_spat) +
+  tm_layout(main.title='', scale=1, main.title.size = .9,
+            bg.color='white', frame=FALSE, inner.margins = c(.07,.0,.0,.06),
+            legend.frame=FALSE, legend.frame.lwd = .1, legend.position = c(.86, .32), legend.title.size=1.1, legend.text.size = .8) +
+  tm_polygons(col = 'REGION', title='Region',
+              border.col = 'white', lwd=1.5, palette=c('#FEB441','#61BB6D','#817EBA','#299EC1')) +
+  tm_credits(text='Note: A total of 315 localities are responding to racism as a public health crisis.',
+             position = c('center','bottom'), size = .75) +
+  tm_shape(states_spat[states_spat$REGION=='Northeast',]) +
+  tm_polygons(col = 'N', legend.show=FALSE, title='State total', breaks=c(.5,1,5), showNA=FALSE, border.col = 'white', lwd=1.5,
+              palette=get_brewer_pal("YlGn", contrast = c(.4,.55))) +
+  tm_shape(states_spat[states_spat$REGION=='Midwest',]) +
+  tm_polygons(col = 'N', legend.show=FALSE, title='State total', breaks=c(.5,1,20), showNA=FALSE, border.col = 'white', lwd=1.5,
+              palette=get_brewer_pal("YlOrRd", contrast = c(.28,.38))) +
+  tm_shape(states_spat[states_spat$REGION=='South',]) +
+  tm_polygons(col = 'N', legend.show=FALSE, title='State total', breaks=c(.5,1,5), showNA=FALSE, border.col = 'white', lwd=1.5,
+              palette=get_brewer_pal("Purples", contrast = c(.42,.55))) +
+  tm_shape(states_spat[states_spat$REGION=='West',]) +
+  tm_polygons(col = 'N', legend.show=FALSE, title='State total', breaks=c(.5,1,21), showNA=FALSE, border.col = 'white', lwd=1.5,
+              palette=get_brewer_pal("GnBu", contrast = c(.57,.72))) +
+  tm_shape(states_spat[states_spat$N!=0&states_spat$STATE_CODE!='MI'&states_spat$STATE_CODE!='CT'&states_spat$STATE_CODE!='RI'&states_spat$STATE_CODE!='NJ'&states_spat$STATE_CODE!='FL'&states_spat$STATE_CODE!='MA'&states_spat$STATE_CODE!='MD'&states_spat$STATE_CODE!='DC',]) +
+  tm_text(text='N', size=.8, col='black', shadow=FALSE, bg.alpha = 0, ymod=0, remove.overlap = TRUE) +
+  tm_shape(states_spat[states_spat$STATE_CODE=='FL',]) +
+  tm_text(text='N', size=.8, col='black', shadow=FALSE, bg.alpha = 0, xmod=.6, remove.overlap = TRUE) +
+  tm_shape(states_spat[states_spat$STATE_CODE=='MI',]) +
+  tm_text(text='N', size=.8, col='black', shadow=FALSE, bg.alpha = 0, ymod=-.6, xmod=.5, remove.overlap = TRUE) +
+  tm_shape(states_spat[states_spat$STATE_CODE=='MA',]) +
+  tm_text(text='N', size=.7, col='black', shadow=FALSE, bg.alpha = 0, ymod=.15, xmod=-.1, remove.overlap = TRUE) +
+  tm_shape(states_spat[states_spat$STATE_CODE=='MD',]) +
+  tm_text(text='N', size=.8, col='black', shadow=FALSE, bg.alpha = 0, ymod=.28, xmod=-.1, remove.overlap = TRUE) +
+  tm_shape(states_spat[states_spat$STATE_CODE=='NJ',]) +
+  tm_text(text='N', size=.8, col='black', shadow=FALSE, bg.alpha = 0, ymod=.1, xmod=.12, remove.overlap = TRUE) +
+  tm_shape(states_spat[states_spat$STATE_CODE=='CT',]) +
+  tm_text(text='N', size=.7, col='black', shadow=FALSE, bg.alpha = 0, ymod=.1, xmod=0, remove.overlap = TRUE) +
+  tm_shape(states_spat[states_spat$STATE_CODE=='RI',]) +
+  tm_text(text='N', size=.7, col='black', shadow=FALSE, bg.alpha = 0, ymod=-.0, xmod=.0, remove.overlap = TRUE)
+
+# State frequencies
+tmap_mode('plot')
+windows(45,40)
+tm_shape(states_spat) +
+  tm_polygons(col = 'black',alpha=1,border.col = 'white',lwd=1.5) +
+  tm_shape(states_spat) +
+  tm_layout(bg.color='white', frame=FALSE, inner.margins = c(0.03,.03,.03,.05), 
+            legend.frame=TRUE, legend.frame.lwd = .1, legend.position = c('right','bottom'), legend.text.size = .8) +
+  tm_polygons(col = 'N', title='State total', breaks=c(0,1,5,10,15,20,25,30,35,40,45,50), showNA=FALSE, border.col = 'white', lwd=1.5, 
+              palette=get_brewer_pal("Blues", n = 12, contrast = c(.3,1))) +
+  tm_credits(text='Note: A total of 267 cites and counties are addressing racism as a public health crisis.',
+             position = c('center','bottom'), size = .75) +
+tm_shape(states_spat[states_spat$N!=0&states_spat$STATE_CODE!='MI'&states_spat$STATE_CODE!='OH'&states_spat$STATE_CODE!='RI'&states_spat$STATE_CODE!='NJ'&states_spat$STATE_CODE!='CA'&states_spat$STATE_CODE!='CT'&states_spat$STATE_CODE!='FL'&states_spat$STATE_CODE!='MA'&states_spat$STATE_CODE!='MD'&states_spat$STATE_CODE!='DC',]) +
+  tm_text(text='N', size=.9, shadow=TRUE, bg.alpha = 0, remove.overlap = FALSE) +
+  tm_text(text='N', size=.8, col='black', shadow=FALSE, bg.alpha = 0, ymod=0, remove.overlap = TRUE) +
+  tm_shape(states_spat[states_spat$STATE_CODE=='FL',]) +
+  tm_text(text='N', size=.8, col='black', shadow=FALSE, bg.alpha = 0, xmod=.6, remove.overlap = TRUE) +
+  tm_shape(states_spat[states_spat$STATE_CODE=='MI',]) +
+  tm_text(text='N', size=.8, col='white', shadow=TRUE, bg.alpha = 0, ymod=-.6, xmod=.5, remove.overlap = TRUE) +
+  tm_shape(states_spat[states_spat$STATE_CODE=='MA',]) +
+  tm_text(text='N', size=.7, col='white', shadow=TRUE, bg.alpha = 0, ymod=.1, xmod=-.1, remove.overlap = TRUE) +
+  tm_shape(states_spat[states_spat$STATE_CODE=='MD',]) +
+  tm_text(text='N', size=.7, col='black', shadow=TRUE, bg.alpha = 0, ymod=.28, xmod=-.1, remove.overlap = TRUE) +
+  tm_shape(states_spat[states_spat$STATE_CODE=='NJ',]) +
+  tm_text(text='N', size=.8, col='black', shadow=TRUE, bg.alpha = 0, ymod=.1, xmod=.1, remove.overlap = TRUE) +
+  tm_shape(states_spat[states_spat$STATE_CODE=='CA',]) +
+  tm_text(text='N', size=.9, col='white', shadow=TRUE, bg.alpha = 0, ymod=0, xmod=-.2, remove.overlap = TRUE) +
+  tm_shape(states_spat[states_spat$STATE_CODE=='OH',]) +
+  tm_text(text='N', size=.9, col='white', shadow=TRUE, bg.alpha = 0, ymod=-.1, xmod=-.1, remove.overlap = TRUE) +
+  tm_shape(states_spat[states_spat$STATE_CODE=='RI',]) +
+  tm_text(text='N', size=.6, col='black', shadow=TRUE, bg.alpha = 0, ymod=0, xmod=.05, remove.overlap = TRUE) +
+  tm_shape(states_spat[states_spat$STATE_CODE=='CT',]) +
+  tm_text(text='N', size=.7, col='white', shadow=TRUE, bg.alpha = 0, ymod=.1, xmod=.1, remove.overlap = TRUE)
+
+
+#-----Charts-----
+
+# Line chart for RPHC declarations by month/year
+## group by month and year
+rphc_dates <- rphc_latestpolicy[JURISDICTION_TYPE!='State', .N, by=.(year(POLICY_DATE), month(POLICY_DATE))]
+setkey(rphc_dates,year,month)
+rphc_dates
+
+all_rphc_dates <- rphc[JURISDICTION_TYPE!='State', .N, by=.(year(POLICY_DATE), month(POLICY_DATE))]
+setkey(all_rphc_dates,year,month)
+all_rphc_dates
+
+##----Export Data----
+
+write.csv(rphc, paste0('Data/Report II/AllResponses_CleanedData', 
+                             gsub('-','',Sys.Date()),'.csv'), row.names=FALSE)
+
+write.csv(rphc_latestpolicy, paste0('Data/Report II/UniqueLocalities_MostRecentResponse', 
+                       gsub('-','',Sys.Date()),'.csv'), row.names=FALSE)
