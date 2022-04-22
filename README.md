@@ -14,4 +14,4 @@ Examples of biostatistics work at the Institute for Healing Justice &amp; Equity
 <br><a href="https://ihje.org/wp-content/uploads/2022/04/final-appendix-racism-is-a-public-health-crisis.pdf" target="_blank">Racism is a Public Health Crisis [Appendix]</a>
 
 ![wage-pass-through-report](https://user-images.githubusercontent.com/79116656/164597966-66edced4-fc0e-4a31-bb61-8645cdaebad7.png)
-<a href="https://ihje.org/wp-content/uploads/2020/12/Direct-Care-Worker-Wage-Pass-Through-Law-Final-Report_September-2020_Insitute-of-Healing-Justice-and-Equity.pdf" target="_blank">Direct Care Worker Wage Pass Through [Full Report]</a>
+<a href="https://ihje.org/wp-content/uploads/2020/12/Direct-Care-Worker-Wage-Pass-Through-Law-Final-Report_September-2020_Insitute-of-Healing-Justice-and-Equity.pdf" target="_blank">Direct Care Worker Wage Pass-Through [Full Report]</a>
