@@ -1,0 +1,319 @@
+###########################################################
+## Title: 00_geodata.R
+## Project: Racism as a Public Health Crisis
+## Author: Charysse Gibson
+## Date: August 21, 2020
+###########################################################
+## Purpose: Create geo data for RPHC relational database
+###########################################################
+## Inputs: 2019_Gaz_place_national.txt
+##         2019_Gaz_counties_national.txt
+##         state_fips.txt
+## Outputs: 2019_geodata_20200827.csv
+##          2019_state_geodata_20200827.csv
+###########################################################
+setwd("C:/Users/gibsonck/Google Drive/Institute for Healing Justice and Equity/RPHC/")
+library(data.table)
+library(Hmisc)
+library(dplyr)
+
+# Variables needed:
+# state
+# state_code
+# state_geoid
+# type
+# name
+# GEOID
+# INTPTLAT
+# INTPTLONG
+
+#----DATASETS & VARIABLES----
+#
+#     Gaz Places & Counties: 
+#     - USPS (state code)
+#     - GEOID
+#     - NAME
+#     - INTPLAT
+#     - INTPTLONG
+#
+#     State & Territory FIPS: 
+#     - state_name
+#     - state_code
+#     - state_geoid
+#
+#     missing geocodes: 
+#     - USPS (state code)
+#     - GEOID
+#     - NAME
+#     - INTPLAT
+#     - INTPTLONG
+
+#----input & explore data----
+
+# read in gazetteer files 
+gaz_place <- as.data.table(read.delim('Data/Geocodes/2019_Gaz_place_national.txt', header=TRUE, 
+                                       colClasses = c(USPS = "character",
+                                                      GEOID = "character", 
+                                                      NAME = "character")))
+Encoding(gaz_place$NAME) <- 'UTF-8'
+
+gaz_counties <- as.data.table(read.delim('Data/Geocodes/2019_Gaz_counties_national.txt', header=TRUE, 
+                                      colClasses = c(USPS = "character",
+                                                     GEOID = "character", 
+                                                     NAME = "character")))
+Encoding(gaz_counties$NAME) <- 'UTF-8'
+
+str(gaz_place)
+nrow(gaz_place) #29574 places
+str(gaz_counties)
+nrow(gaz_counties) #3220 counties
+
+# # substitute accented characters
+# unwanted_array = list(    'S'='S', 's'='s', 'Z'='Z', 'z'='z', 'À'='A', 'Á'='A', 'Â'='A', 'Ã'='A', 'Ä'='A', 'Å'='A', 'Æ'='A', 'Ç'='C', 'È'='E', 'É'='E',
+#                           'Ê'='E', 'Ë'='E', 'Ì'='I', 'Í'='I', 'Î'='I', 'Ï'='I', 'Ñ'='N', 'Ò'='O', 'Ó'='O', 'Ô'='O', 'Õ'='O', 'Ö'='O', 'Ø'='O', 'Ù'='U',
+#                           'Ú'='U', 'Û'='U', 'Ü'='U', 'Ý'='Y', 'Þ'='B', 'ß'='Ss', 'à'='a', 'á'='a', 'â'='a', 'ã'='a', 'ä'='a', 'å'='a', 'æ'='a', 'ç'='c',
+#                           'è'='e', 'é'='e', 'ê'='e', 'ë'='e', 'ì'='i', 'í'='i', 'î'='i', 'ï'='i', 'ð'='o', 'ñ'='n', 'ò'='o', 'ó'='o', 'ô'='o', 'õ'='o',
+#                           'ö'='o', 'ø'='o', 'ù'='u', 'ú'='u', 'û'='u', 'ý'='y', 'ý'='y', 'þ'='b', 'ÿ'='y' )
+# library(gsubfn)
+# gaz_place[,NAME:=gsubfn(paste(names(unwanted_array),collapse='|'), unwanted_array,NAME)]
+
+
+# read in state FIPS file
+state_fips <- as.data.table(read.delim('Data/Geocodes/state_territory_fips.txt', header=TRUE, 
+                                       colClasses = c(state_name = "character", 
+                                                      state_geoid = "character")))
+str(state_fips)
+state_fips$state_name
+
+# read in missing geocodes file
+missing_geocodes <- as.data.table(read.delim('Data/Geocodes/missing_geocodes.txt', header=TRUE, 
+                                         colClasses = c(USPS = "character",
+                                                        GEOID = "character", 
+                                                        NAME = "character")))
+Encoding(missing_geocodes$NAME) <- 'UTF-8'
+str(missing_geocodes)
+
+# check for missing data
+missing_geocodes[is.na(USPS),]
+missing_geocodes[is.na(GEOID),]
+missing_geocodes[is.na(NAME),]
+missing_geocodes[is.na(INTPTLAT),]
+missing_geocodes[is.na(INTPTLONG),]
+
+#----create geo dataset----
+## 1 - Bind place and missing places datasets
+## 2 - Create type variable for places and counties datasets
+## 3 - Subset needed variables and merge datasets
+## 4 - Attach state names (include territories)
+## 5 - Create census geography
+
+## combine places and missing places datasets
+combined_places <- dplyr::bind_rows(gaz_place,missing_geocodes)
+
+
+## Create type variable for places and counties datasets
+combined_places[,TYPE:='place']
+gaz_counties[,TYPE:='county']
+
+
+## Subset needed variables and merge datasets
+# rename USPS to state_code
+setnames(combined_places,'USPS','state_code')
+setnames(gaz_counties,'USPS','state_code')
+# subset variables
+geo_places <- combined_places[,.(state_code,GEOID,NAME,TYPE,INTPTLAT,INTPTLONG)]
+geo_counties <- gaz_counties[,.(state_code,GEOID,NAME,TYPE,INTPTLAT,INTPTLONG)]
+# merge datasets
+geodata <- rbind(geo_places,geo_counties)
+nrow(geodata) #32794
+
+
+## Attach state names (including territories)
+unique(geodata$state_code)
+setkey(geodata,state_code)
+setkey(state_fips,state_code)
+geodata[state_fips, ':=' (state_name=state_name)]
+geodata[, grep("^state_code$", colnames(geodata)):=NULL]
+
+## Create census geography
+geodata[,census_geo:=paste(NAME, sep=", ", state_name)]
+# change NAME to census_name
+setnames(geodata,'NAME','census_name')
+
+
+#----extract name identifiers----
+## 1 - Identify unique string endings to remove
+## 2 - Check names and remove unwanted strings in names by group
+## 3 - Organize variables and export dataset to double check names
+
+
+## Identify unique string endings to remove
+library(stringi)
+geodata[,unique(stri_extract_last_words(census_name))]
+# paste(geodata[,unique(stri_extract_last_words(census_name))], collapse='# ')
+
+## KEEP
+# City
+# County
+# Municipality
+# Municipio
+# Parish
+
+## REMOVE
+# Area (Alaska only)
+# Borough (Alaska only)
+# borough
+# ... (balance)
+# CDP
+# city
+# county
+# ... government
+# municipality
+# town
+# village
+# comunidad
+# ... urbana
+# ... township
+# corporation
+
+
+## Check names and remove unwanted strings in names by group
+
+# Area
+geodata[grepl('Area$',census_name),] #10
+geodata[grepl('Area$',census_name), NAME:=gsub(' Census Area','',census_name)]
+
+# Borough
+geodata[grepl('Borough$',census_name),] #17 (distinguish City and Borough vs Borough)
+geodata[grepl('City and Borough$',census_name),] #4
+geodata[grepl('City and Borough$',census_name), NAME:=gsub(' City and Borough','',census_name)]
+geodata[grepl('Borough$',census_name) & !grepl('City',census_name),] #13
+geodata[grepl('Borough$',census_name) & !grepl('City',census_name), NAME:=gsub(' Borough','',census_name)]
+
+# borough
+geodata[grepl('\\bborough',census_name),] #1219 (distinguish city and borough vs borough)
+geodata[grepl('city and borough$',census_name),] #3
+geodata[grepl('city and borough$',census_name), NAME:=gsub(' city and borough','',census_name)]
+geodata[grepl('borough$',census_name) & !grepl('city',census_name),] #1216
+geodata[grepl('borough$',census_name) & !grepl('city',census_name), NAME:=gsub(' borough','',census_name)]
+
+# ... (balance)
+geodata[grepl(' [[:punct:]]balance[[:punct:]]',census_name),]#8 (remove balance, break into groups)
+geodata[grepl(' [[:punct:]]balance[[:punct:]]',census_name), NAME:=gsub(' [[:punct:]]balance[[:punct:]]','',census_name)]
+# city (balance)
+geodata[grepl(' [[:punct:]]balance[[:punct:]]',census_name) & grepl('city',census_name)] #2
+geodata[grepl(' [[:punct:]]balance[[:punct:]]',census_name) &
+           grepl('city',census_name), NAME:=gsub('\\scity$','', NAME)]
+# consolidated government (balance)
+geodata[grepl(' [[:punct:]]balance[[:punct:]]',census_name) & grepl('consolidated government',census_name)] #1
+geodata[grepl(' [[:punct:]]balance[[:punct:]]',census_name) &
+           grepl('consolidated government',census_name), NAME:=gsub(" consolidated government", "", NAME)]
+# metro governemnt (balance)
+geodata[grepl(' [[:punct:]]balance[[:punct:]]',census_name) & grepl('metro government',census_name)] #1
+geodata[grepl(' [[:punct:]]balance[[:punct:]]',census_name) &
+           grepl('metro government',census_name), NAME:=gsub(" metro government", "", NAME)]
+# metropolitan government (balance)
+geodata[grepl(' [[:punct:]]balance[[:punct:]]',census_name) & grepl('metropolitan government',census_name)] #1
+geodata[grepl(' [[:punct:]]balance[[:punct:]]',census_name) &
+           grepl('metropolitan government',census_name), NAME:=gsub(" metropolitan government", "", NAME)]
+# unified government (balance)
+geodata[grepl(' [[:punct:]]balance[[:punct:]]',census_name) & grepl('unified government',census_name)] #2
+geodata[grepl(' [[:punct:]]balance[[:punct:]]',census_name) &
+           grepl('unified government',census_name), NAME:=gsub(" unified government", "", NAME)]
+
+# CDP
+geodata[grepl(' CDP',census_name),] #9796
+geodata[grepl(' CDP',census_name), NAME:=gsub(" CDP", "", census_name)]
+
+# city
+geodata[grepl('\\s\\bcity$',census_name),] #10231
+geodata[grepl('\\s\\bcity$',census_name), NAME:=gsub('\\s\\bcity$', "", census_name)]
+
+# urban county
+geodata[grepl(' urban county',census_name),] #1
+geodata[grepl(' urban county',census_name), NAME:=gsub(' urban county', "", census_name)]
+
+# ... government
+geodata[grepl(' government',census_name),] #10 (different groups, some with "balance")
+geodata[grepl(' government',census_name) & !grepl('balance',census_name),] #5
+# consolidated governemnt 
+geodata[grepl(' consolidated government',census_name) & !grepl('balance',census_name),
+         NAME:=gsub(' consolidated government','',census_name)]
+# metropolitan government
+geodata[grepl(' metropolitan government',census_name) & !grepl('balance',census_name),
+         NAME:=gsub(' metropolitan government','',census_name)]
+# unified government
+geodata[grepl(' unified government',census_name) & !grepl('balance',census_name),
+         NAME:=gsub(' unified government','',census_name)]
+
+# municipality
+geodata[grepl('municipality',census_name),] #4
+geodata[grepl('municipality',census_name), NAME:=gsub(' municipality','',census_name)]
+
+# town
+geodata[grepl('\\s\\btown$',census_name),] #4348
+geodata[grepl('\\s\\btown$',census_name), NAME:=gsub('\\s\\btown$','',census_name)]
+
+# village
+geodata[grepl('\\s\\bvillage$',census_name),] #3738
+geodata[grepl('\\s\\bvillage$',census_name), NAME:=gsub('\\s\\bvillage$','',census_name)]
+
+# comunidad
+geodata[grepl('\\bcomunidad$',census_name),] #175
+geodata[grepl(' comunidad',census_name), NAME:=gsub(' comunidad','',census_name)]
+
+# zona urbana
+geodata[grepl('\\burbana$',census_name),] #78
+geodata[grepl(' zona urbana',census_name), NAME:=gsub(' zona urbana','',census_name)]
+
+# metro township
+geodata[grepl('township$',census_name),] #5
+geodata[grepl(' metro township$',census_name), NAME:=gsub(' metro township','',census_name)]
+
+# corporation
+geodata[grepl('corporation$',census_name),] #5
+geodata[grepl(' corporation$',census_name), NAME:=gsub(' corporation','',census_name)]
+
+## Keep proper name strings
+geodata[is.na(NAME),NAME:=census_name]
+
+## Quick check
+geodata[grepl('\\b[a-z]$',NAME),print(stri_extract_last_words(NAME))]
+
+## Organize variables and export dataset to double check names
+str(geodata)
+names(geodata) <- toupper(names(geodata))
+names(geodata)
+setcolorder(geodata, c('GEOID',
+                        'STATE_NAME',
+                        'NAME',
+                        'TYPE',
+                        'INTPTLAT',
+                        'INTPTLONG',
+                        'CENSUS_NAME',
+                        'CENSUS_GEO'))
+setkey(geodata,STATE_NAME,NAME)
+write.csv(geodata, paste0('Data/Geodata/geodata_', 
+                          gsub('-','',Sys.Date()),'.csv'), row.names=FALSE)
+
+
+##----comma separated list of unique names (Google forms data validation)----
+
+setkey(geodata,NAME)
+geodata_txt_file <- file(paste0('Data/Geodata/geonames_', 
+                                gsub('-','',Sys.Date()),'.txt'))
+writeLines(paste(geodata[,unique(NAME)], collapse=','),geodata_txt_file)
+close(geodata_txt_file)
+
+##----table/range of unique names----
+
+setkey(geodata,NAME)
+unique_names <- geodata[,.(NAME=unique(NAME))]
+write.csv(unique_names, paste0('Data/Geodata/geonames_', 
+                               gsub('-','',Sys.Date()),'.csv'), row.names=FALSE)
+
+##----Export state geodata----
+names(state_fips) <- toupper(names(state_fips))
+names(state_fips)
+write.csv(state_fips, paste0('Data/Geodata/geodata_state_', 
+                             gsub('-','',Sys.Date()),'.csv'), row.names=FALSE)
