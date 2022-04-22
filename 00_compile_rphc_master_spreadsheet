@@ -1,0 +1,121 @@
+######################################################################
+## Title: 00_master_spreadsheet.R
+## Project: Racism as a Public Health Crisis
+## Author: Charysse Gibson
+## Date: October 21, 2020
+######################################################################
+## Purpose: compile and manage legal documentation spreadsheets 
+######################################################################
+## Inputs: 2019_Gaz_place_national.txt
+##         2019_Gaz_counties_national.txt
+##         state_fips.txt
+## Outputs: 2019_geodata_20200827.csv
+##          2019_state_geodata_20200827.csv
+######################################################################
+setwd("C:/Users/gibsonck/Google Drive/Institute for Healing Justice and Equity/RPHC/")
+library(data.table)
+library(Hmisc)
+library(readr)
+library(vroom)
+library(dplyr)
+
+# Variables needed:
+  # Timestamp
+  # Type
+  # City/County
+  # State/U.S. Territory
+  # Government Body
+  # Policy Number
+  # Policy Date
+  # Policy Type
+  # Policy Status
+  # Define [Race]
+  # Define [Racism]
+  # Define [Systemic Racism]
+  # Define [White Supremacy]
+  # Race Definition
+  # Racism Definition
+  # Systemic Racism Definition
+  # White Supremacy Definition
+  # Identify [Impact Areas]
+  # Identify [Budget Changes]
+  # Identify [Reparations]
+  # Identify [Evaluation Measures]
+  # Identify [Community Engagement]
+  # Identify [Racial Equity Tools]
+  # Impact Areas Identified
+  # Budget Changes Identified
+  # Reparations Identified
+  # Evaluation Measures Identified
+  # Community Engagement Identified
+  # Racial Equity Tools Identified
+
+# Pseudocode:
+  # 1 - Locate which files to compile and save them to extraction folder
+  # 2 - Automate import all csv files
+  # 3 - Combine csv files
+  # 4 - Create codebook and variables
+  # 5 - Explore and clean data (verify with and add geodata)
+  # 6 - Create summaries and tables
+  # 7 - Create map coding
+  # 8 - Automate information into reports
+
+#----import data----
+
+# locate and read in legal documentation files
+files <- list.files(path = "Data/Legal Documentation/", pattern = "*legaldoc.csv", full.names = T)
+
+# import and bind data
+alldata <- vroom(files)
+class(alldata)
+alldata <- as.data.table(alldata)
+
+# use codebook variables
+codebook <- fread(file = "Data/Legal Documentation/legaldoc_codebook.csv")
+str(codebook)
+names(alldata)
+names(codebook)
+names(alldata) <- codebook$Variable_Name
+
+# create posix dates and times
+alldata[,datetime:=as.POSIXct(datetime, format = "%m/%d/%Y %H:%M:%S")]
+str(alldata$datetime)
+
+##----merge geodata----
+
+geodata <- fread(file = "Data/Geodata/geodata_20201110.csv", 
+                 colClasses = c(GEOID = "character"))
+setkey(geodata,NAME,STATE_NAME)
+setkey(alldata,location,state)
+names(geodata)
+alldata <-  alldata[geodata,':=' 
+                    (GEOID=GEOID,
+                      INTPTLAT=INTPTLAT,
+                      INTPTLONG=INTPTLONG)]
+errors <- alldata[is.na(GEOID),.(timestamp,location,state,type)]
+errors <- tibble::as_tibble(errors)
+
+##----export master spreadsheet----
+paste(names(alldata), collapse=", ")
+master <- alldata[,.(datetime, type, state, location, govbody, policynum, 
+                     policydate, policytype, policystat, race, racism, systemic_racism, 
+                     white_supremacy, race_def, racism_def, systemic_racism_def, white_supremacy_def, 
+                     impact_areas, budget, reparations, eval_measures, comm_engage, re_tools, 
+                     impact_areas_id, budget_id, reparations_id, eval_measures_id, comm_engage_id, 
+                     re_tools_id, other_info, researcher, GEOID, INTPTLAT, INTPTLONG)]
+setkey(master,state,location,datetime)
+write.csv(master, paste0('Data Collection/Master Spreadsheet/master_sheet_', 
+                               gsub('-','',Sys.Date()),'.csv'), row.names=FALSE)
+
+##----explore and summarize----
+
+nrow(alldata)
+alldata[,.(N=nrow(alldata),unique_locations=uniqueN(location))]
+
+# identify unique ids (most recent date)
+
+## needs to be modified below:
+rphc <- rphc[order(STATE,LOCATION,-POLICY_DATE)]
+nrow(rphc) #40 data entries
+rphc_latestpolicy <- unique(rphc, by=c('STATE','LOCATION'))
+nrow(rphc) #40 unique locations (most recent policy)
