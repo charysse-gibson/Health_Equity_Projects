@@ -1,0 +1,186 @@
+######################################################################
+## Title: Census Demographics
+## Project: RWJF
+## Author: Charysse Gibson
+## Date created: June 15, 2021
+######################################################################
+# Purpose: Get Census demographic data
+######################################################################
+
+#-----input datasets-----
+library(data.table)
+library(censusapi)
+
+# Add key to .Renviron
+Sys.setenv(CENSUS_KEY='e14b97051ff4840408377a2cd08a2b43eaee30f2')
+# Reload .Renviron
+# readRenviron("~/.Renviron")
+# Check to see that the expected key is output in your R console
+# Sys.getev("CENSUS_KEY")
+
+# check Census APIs
+apis <- listCensusApis()
+
+# check 2019 American Community Survey: 5-Year Estimates variables
+acs_vars <- listCensusMetadata(
+  name = "2019/acs/acs5", 
+  type = "variables")
+
+# check 2019 American Community Survey: 5-Year Estimates geographic levels
+acs_geo <- listCensusMetadata(
+  name = "2019/acs/acs5", 
+  type = "geography")
+## need county and place levels
+
+# get census data
+## county level
+acs_county_data <- getCensus(
+  name = "2019/acs/acs5",
+  vars = c("NAME",
+           "GEO_ID",
+           "B01003_001E", 
+           "B02001_005E",
+           "B02001_003E",
+           "B02001_006E",
+           "B02001_004E",
+           "B02001_002E",
+           "B02001_007E",
+           "B02001_008E",
+           "B03002_012E"), 
+  region = "county:*")
+names(acs_county_data)
+names(acs_county_data) <- c("STATE_ID",
+                            "LOCATION_ID",
+                            "NAME",
+                            "GEOID",
+                            "Total_pop_estimate",
+                            "Asian",
+                            "Black",
+                            "Hawaiian_Pacific_Islander",
+                            "Native_American_Alaskan",
+                            "White",
+                            "Other_Race",
+                            "Two_Or_More",
+                            "Hispanic_Latino")
+## place level
+acs_city_data <- getCensus(
+  name = "2019/acs/acs5",
+  vars = c("NAME",
+           "GEO_ID",
+           "B01003_001E", 
+           "B02001_005E",
+           "B02001_003E",
+           "B02001_006E",
+           "B02001_004E",
+           "B02001_002E",
+           "B02001_007E",
+           "B02001_008E",
+           "B03002_012E"), 
+  region = "place:*")
+names(acs_city_data)
+names(acs_city_data) <- c("STATE_ID",
+                          "LOCATION_ID",
+                          "NAME",
+                          "GEOID",
+                          "Total_pop_estimate",
+                          "Asian",
+                          "Black",
+                          "Hawaiian_Pacific_Islander",
+                          "Native_American_Alaskan",
+                          "White",
+                          "Other_Race",
+                          "Two_Or_More",
+                          "Hispanic_Latino")
+
+
+master_spreadsheet <- fread('C:/Users/gibsonck/Google Drive/Institute for Healing Justice and Equity/RWJF/Data/Final/master_spreadsheet_20210413.csv',
+                            colClasses = c(GEOID='character'))
+
+#-----manage data-----
+
+# merge city and county demographics
+all_demographics <- rbind(acs_city_data,acs_county_data)
+# convert to data.table
+all_demographics <- as.data.table(all_demographics)
+## clean GEOID variables
+all_demographics[, ':=' ("STATE_ID"=NULL,
+                         "LOCATION_ID"=NULL)]
+all_demographics[,GEOID:=sub('.*US','',GEOID)]
+str(all_demographics)
+## create all city and county demographic percentages
+all_percentages <- all_demographics[,lapply(.SD,"/",Total_pop_estimate),.SDcols=c(4:11)]
+paste(as.character(names(all_percentages)),collapse=', ')
+names(all_percentages) <- c("Asian_Percent", 
+                            "Black_Percent", 
+                            "Hawaiian_Pacific_Islander_Percent", 
+                            "Native_American_Alaskan_Percent", 
+                            "White_Percent", 
+                            "Other_Race_Percent", 
+                            "Two_Or_More_Percent",
+                            "Hispanic_Latino_Percent")
+all_demographics <- cbind(all_demographics,all_percentages)
+
+# extract demographics for 107 jurisdictions working with GARE and/or PolicyLink
+
+## pull list of 107 cities and counties
+names(master_spreadsheet)
+demographics <- master_spreadsheet[,.(LOCATION,STATE,TYPE,GEOID,POLICYLINK,GARE)]
+# ## join demographics by GEOID
+# setkey(demographics,GEOID)
+# setkey(all_demographics,GEO.id2)
+# names(all_demographics)
+# demographics[all_demographics, ':=' (Total_pop_estimate=Total_pop_estimate,
+#                                      Asian=Asian,
+#                                      Black=Black,
+#                                      Hawaiian_Pacific_Islander=Hawaiian_Pacific_Islander,
+#                                      Native_American_Alaskan=Native_American_Alaskan,
+#                                      White=White,
+#                                      Other_Race=Other_Race,
+#                                      Two_Or_More=Two_Or_More)][]
+# # check if any locations missing
+# demographics[is.na(GEOID),]
+# demographics[is.na(Total_pop_estimate),]
+## Louisville, KY GEOID has changed/is different
+demographics[LOCATION=='Louisville', GEOID:='2148006']
+setkey(demographics,GEOID)
+setkey(all_demographics,GEOID)
+paste(as.character(names(all_demographics)),collapse=', ')
+demographics[all_demographics, ':=' (Total_pop_estimate=Total_pop_estimate,
+                                     Asian=Asian,
+                                     Black=Black,
+                                     Hawaiian_Pacific_Islander=Hawaiian_Pacific_Islander,
+                                     Native_American_Alaskan=Native_American_Alaskan,
+                                     White=White,
+                                     Other_Race=Other_Race,
+                                     Two_Or_More=Two_Or_More,
+                                     Hispanic_Latino=Hispanic_Latino,
+                                     Asian_Percent=Asian_Percent, 
+                                     Black_Percent=Black_Percent, 
+                                     Hawaiian_Pacific_Islander_Percent=Hawaiian_Pacific_Islander_Percent, 
+                                     Native_American_Alaskan_Percent=Native_American_Alaskan_Percent, 
+                                     White_Percent=White_Percent, 
+                                     Other_Race_Percent=Other_Race_Percent, 
+                                     Two_Or_More_Percent=Two_Or_More_Percent, 
+                                     Hispanic_Latino_Percent=Hispanic_Latino_Percent)]
+# check if any locations missing
+demographics[is.na(GEOID),]
+demographics[is.na(Total_pop_estimate),]
+
+#-----explore data-----
+
+# library(Hmisc)
+# str(all_demographics)
+# summary(all_demographics[,12:18])
+# 
+# str(demographics)
+# summary(demographics[,16:22])
+
+#-----outputs-----
+
+# 107 jurisdictions demographics
+write.csv(demographics, paste0('C:/Users/gibsonck/Google Drive/Institute for Healing Justice and Equity/RWJF/Data/Final/107_demographics_', 
+                               gsub('-','',Sys.Date()),'.csv'), row.names=FALSE)
+
+# all cites and counties demographics
+write.csv(all_demographics, paste0('C:/Users/gibsonck/Google Drive/Institute for Healing Justice and Equity/RWJF/Data/Final/all_cities_counties_demographics_', 
+                                   gsub('-','',Sys.Date()),'.csv'), row.names=FALSE)
