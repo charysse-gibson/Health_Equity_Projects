@@ -1,0 +1,289 @@
+###########################################################
+## Title: 00_proc_chart_map.R
+## Project: Racism as a Public Health Crisis
+## By: Charysse Gibson
+## Date: July 23, 2020
+###########################################################
+## Purpose: Data Management & Mapping
+###########################################################
+## Inputs: proclamation Chart_20200230.csv
+##         state_fips.txt
+##         2017_Gaz_place_national.txt
+## Outputs: none
+###########################################################
+setwd('C:/Users/chary/OneDrive/Documents/SLU/IHJE/RWJF Grant Research/Racism as a Public Health Crisis/')
+library(data.table)
+library(Hmisc)
+
+# Variables in Skeleton Table:
+# States: geoid, geography, geometry
+# Counties: geoid, geography, rphc, geometry
+# Cities: geoid, geography, rphc, lat, long
+
+#----DATASETS & VARIABLES----
+#
+#     Proclamation Chart: 
+#     - Geography
+#     - Status
+#
+#     State FIPS (all states):
+#     - geo.id2 (geoid)
+#     - Geography 
+#
+#     State LAEA (restricting to contiguous us, all states):
+#     - geoid
+#     - geometry
+#
+#     Census 2017 (most recent 5yr acs, all counties):
+#     - geo.id2 (geoid)
+#     - Geography 
+#
+#     County LAEA (all counties):
+#     - geoid
+#     - geometry
+#
+#     Gazetteer national places file (all cities):
+#     - geoid
+#     - lat
+#     - long
+#
+
+#----PROCLAMATION CHART (must run)----
+
+# input proclamation chart data
+rphc <- fread("data/Proclamation Chart_20200730.csv")
+nrow(rphc) #194
+
+# manage proclamation chart data
+describe(rphc)
+summary(rphc)
+nrow(rphc[Type=='city']) #95 cities with any rphc status in proclamation chart
+nrow(rphc[Type=='county']) #51 counties with any rphc status in proclamation chart
+# 95 cities + 51 counties = 146 total
+
+# other types
+rphc[Type!='city' & Type!='county',unique(Type)] #9 unique types not city or county
+nrow(rphc[Type!='city' & Type!='county']) #48 total in "other" types
+
+# extract cities and counties
+cities_counties <- rphc[Type=='city' | Type=='county']
+
+# extract geography, type, & status
+rphc_status <- cities_counties[,.(Geography,Type,Status,State)]
+unique(rphc_status$Status)
+
+# remove status types not 'passed' or 'implemented'
+rphc_status[Status=='' | 
+              Status =='N/A' |
+              Status =='Vetoed' |
+              Status =='delayed' |
+              Status =='failed' |
+              Status=='pending',Status:=NA]
+
+# capitalize status
+rphc_status[!is.na(Status),Status:=capitalize(Status)]
+
+# change 'status' variable to factor
+rphc_status$Status <- as.factor(rphc_status$Status)
+summary(rphc_status)
+
+# check rows
+nrow(rphc_status) #146 (194 on rphc list - 48 not city or county)
+
+# separate cities and counties
+rphc_cities <- rphc_status[Type=='city',.(Geography, Status)]
+nrow(rphc_status[!is.na(Status) & Type=='city',]) #72 rphc cities (correct) 
+                                                  # ONLY 68 MAPPED BY CENSUS DATA (see cities section)
+rphc_counties <- rphc_status[Type=='county',.(Geography, Status)] 
+nrow(rphc_status[!is.na(Status) & Type=='county',]) #40 rphc counties (correct)
+
+##----state clusters----
+state_rphc <- data.table(table(rphc_status[!is.na(Status),.(State, Status)]))
+
+#----STATES----
+
+#### FIPS CODES
+
+# read in state fips codes
+state_fips <- as.data.table(read.delim('data/state_fips.txt', header=TRUE, 
+                                       colClasses = c(GEOID = "character", 
+                                                      Geography = "character")))
+str(state_fips)
+state_fips$Geography
+
+#### STATE_LAEA
+
+# get state_laea data
+library(tidycensus)
+data("state_laea", package = 'tidycensus')
+
+# merge "Geography" variable
+library(sp)
+state_laea <- merge(state_laea, state_fips, by='GEOID', all.x=TRUE)
+
+# convert to spatial data
+library(sf)
+states_spat <- as_Spatial(state_laea)
+
+# remove Alaska, Hawaii, & DC
+states_spat <- states_spat[-grep("Alaska",states_spat$Geography),]
+states_spat <- states_spat[-grep("Hawaii",states_spat$Geography),]
+
+#### MAP
+
+# check map
+# library(tmap)
+# tmap_mode("view")
+# tm_shape(states_spat) +
+#   tm_layout(main.title='US States', title.size = 12) +
+#   tm_polygons('GEOID', showNA=FALSE)
+
+#----COUNTIES----
+
+#### COUNTY CENSUS
+
+# input census data
+library(tidycensus)
+census_counties <- get_acs('county', table='B01003', year=2017,
+                           output='tidy', state=NULL, geometry=FALSE)
+census_counties <- as.data.table(census_counties)
+
+# manage and merge census geoid data
+str(census_counties)
+
+# rename Geography variable
+names(census_counties)
+setnames(census_counties,'NAME','Geography')
+
+# extract variables
+census_counties <- census_counties[,.(GEOID, Geography)]
+
+# merge GEOID to rphc_counties
+setkey(census_counties, Geography)
+setkey(rphc_counties, Geography)
+census_counties_rphc <- merge(census_counties, rphc_counties, all.x=TRUE) 
+nrow(census_counties_rphc[!is.na(Status),]) #40 counties
+
+#### COUNTY_LAEA 
+
+# get county_laea spatial data
+library(tidycensus)
+data("county_laea", package = "tidycensus")
+
+# merge geography, geoid, & rphc status
+counties_spat <- merge(county_laea, census_counties_rphc, by='GEOID', all.x=TRUE)
+
+# convert to spatial data
+library(sf)
+counties_spat <- as_Spatial(counties_spat)
+
+# remove Alaska & Hawaii
+counties_spat <- counties_spat[-grep(", Alaska",counties_spat$Geography),]
+counties_spat <- counties_spat[-grep(", Hawaii",counties_spat$Geography),]
+counties_spat <- counties_spat[counties_spat$GEOID!='02270',]
+
+#### MAP
+
+# check map
+# library(tmap)
+# tmap_mode("view")
+# tm_shape(counties_spat) +  
+#   tm_layout(main.title='US Counties', title.size = 12) +
+#   tm_polygons('GEOID', showNA=FALSE)
+
+#----CITIES----
+
+#### CITY CENSUS
+
+#get city census data
+library(tidycensus)
+census_places <- get_acs('place', table='B01003', year=2017,
+                           output='tidy', state=NULL, geometry=FALSE)
+census_places <- as.data.table(census_places)
+
+# rename Geography variable
+names(census_places)
+setnames(census_places,'NAME','Geography')
+
+# extract variables
+census_places <- census_places[,.(GEOID, Geography)]
+
+# merge GEOID to rphc_counties
+setkey(census_places, Geography)
+setkey(rphc_cities, Geography)
+census_cities_rphc <- merge(census_places, rphc_cities, all.x=TRUE) 
+nrow(census_cities_rphc[!is.na(Status),]) #68 counties
+
+#### GAZETTEER CITY DATA
+
+# read in gazetteer file for Census places
+gaz_places <- as.data.table(read.delim('data/2017_Gaz_place_national.txt',
+               header=TRUE, colClasses = c(GEOID = "character")))
+str(gaz_places)
+
+# setkey by GEOID
+setkey(gaz_places, GEOID)
+setkey(census_cities_rphc, GEOID)
+
+# extract latitude and longitude by GEOID
+cities_spat <- census_cities_rphc[gaz_places, ':=' (Lat=INTPTLAT,Long=INTPTLONG)]
+
+# remove empty row (Census header row)
+cities_spat <- cities_spat[!is.na(Long)]
+
+# remove Alaska & Hawaii
+cities_spat <- cities_spat[-grep(", Alaska",cities_spat$Geography),]
+cities_spat <- cities_spat[-grep(", Hawaii",cities_spat$Geography),]
+cities_spat <- cities_spat[-grep(", Puerto Rico",cities_spat$Geography),]
+
+# convert to spatial data
+cities_spat <- st_as_sf(cities_spat, coords = c("Long", "Lat"), 
+                 crs = 4326, agr='constant')
+cities_spat <- as_Spatial(cities_spat)
+
+#### MAP
+
+# check map
+# library(tmap)
+# tm_shape(cities_spat) +
+#   tm_layout(main.title='US Cities', title.size = 12,
+#             inner.margins = c(.05,.05,.05,.4)) +
+#   tm_dots('GEOID', showNA=FALSE, legend.hist=TRUE) 
+
+#----MAPPING----
+library(tmap)
+library(tmaptools)
+# tmaptools::palette_explorer()
+
+tmap_mode('plot')
+windows(12,7)
+tm_shape(states_spat) +
+  tm_fill(col='gray80', showNA=FALSE, legend.show = FALSE) +
+tm_shape(counties_spat) +
+    tm_borders(col='gray70',lwd=.5)+
+tm_shape(states_spat) +
+  tm_borders(col='white',lwd=2)+
+tm_shape(counties_spat[!is.na(counties_spat$Status),]) +
+  tm_layout(main.title='Local Government Declarations that Racism is a Public Health Crisis', scale=1, main.title.size = 1,
+            bg.color='white', frame=FALSE, inner.margins = c(0.04,.03,.02,.03), 
+            legend.frame=TRUE, legend.frame.lwd = .1, legend.position = c('left','bottom'), legend.text.size = .7) +
+  tm_polygons('Status', title="County Declaration Status ", palette= 'Set1', showNA=FALSE) +
+tm_shape(cities_spat[!is.na(cities_spat$Status),]) +
+  tm_symbols(col='Status', size=.7, shape=21, palette='Set1', alpha=.8, border.col='black', 
+             border.lwd=.5, border.alpha=1,
+             title.col="City Declaration Status")+
+  tm_text(text='Geography', size=.7, shadow=TRUE,
+          remove.overlap=TRUE, just='bottom', ymod=-.75)
+
+tmap_mode('view')
+tm_shape(states_spat) +
+  tm_fill(col='gray80', showNA=FALSE, legend.show = FALSE) +
+  tm_borders(col='white',lwd=1)+
+  tm_shape(counties_spat[!is.na(counties_spat$Status),]) +
+  tm_layout(main.title='Local Government Declarations that Racism is a Public Health Crisis', title.size = 10,
+            bg.color='white', inner.margins = c(.02,.02,.02,.02), legend.frame=TRUE, legend.frame.lwd = .5) +
+  tm_polygons('Status', title="County Declaration Status ", colorNA='gray95', showNA=FALSE) +
+  tm_shape(cities_spat[!is.na(cities_spat$Status),]) +
+  tm_symbols(col='Status', size=1, shape=21, alpha=.8, border.col='black',border.lwd=.5, border.alpha=1,
+             title.col="City Declaration Status")+
+  tm_text(text='Geography', size=.7, remove.overlap=TRUE, just='bottom', ymod=-1, clustering=TRUE)
