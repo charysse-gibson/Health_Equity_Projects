@@ -1,0 +1,62 @@
+---
+title: 'RPHC: Descriptive Statistics'
+author: "Charysse Gibson"
+date: "4/13/2021"
+output:
+  word_document: default
+  html_document:
+    df_print: paged
+  pdf_document: default
+---
+
+<style type="text/css">
+
+body, td {
+   font-size: 8px;
+}
+code.r{
+  font-size: 8px;
+}
+pre {
+  font-size: 8px
+}
+</style>
+
+```{r setup, include=FALSE}
+library(data.table)
+library(Hmisc)
+library(tableone)
+
+rphc <- fread('C:/Users/gibsonck/Google Drive/Institute for Healing Justice and Equity/RWJF/Data/Final/rphc_20210413.csv',colClasses = c(GEOID='character'))
+
+geodata_state <- fread(file = "C:/Users/gibsonck/Google Drive/Institute for Healing Justice and Equity/RWJF/Data/geodata_state_regions_20210329.csv", 
+                 colClasses = c(STATE_GEOID = "character"))
+
+setkey(rphc, STATE)
+setkey(geodata_state, STATE_NAME)
+
+# create state code & state regions
+rphc[geodata_state, STATE_CODE:=STATE_CODE]
+rphc[geodata_state, STATE_REGION:=STATE_REGION]
+rphc[,STATE_REGION:=factor(STATE_REGION,levels=c("Northeast","Midwest","South","West"))]
+
+# change TYPE: locality to city
+rphc[TYPE=='Locality', TYPE:='City']
+## public health association
+rphc[TYPE=='WI Public Health Association', TYPE:='Public Health Association']
+```
+
+### Descriptive statistics
+
+```{r descriptive statistics, echo=FALSE, message=FALSE}
+
+## Vector of variables
+myVars <- c("STATE_REGION", "STATE",  "TYPE")
+
+## Vector of categorical variables that need transformation
+catVars <- c("STATE_REGION", "STATE", "TYPE")
+
+## Create TableOne object
+tab1 <- CreateTableOne(vars = myVars, data = rphc, factorVars = catVars)
+summary(tab1)
+```
